@@ -1,250 +1,228 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import jsQR from 'jsqr';
+import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 
 function BarcodeScanner({ onDetected, onCancel }) {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const debugCanvasRef = useRef(null);
   const [error, setError] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [scanAttempts, setScanAttempts] = useState(0);
+  const [lastScannedCode, setLastScannedCode] = useState('');
   const scanningRef = useRef(false);
+  const codeReaderRef = useRef(null);
+  const streamRef = useRef(null);
 
-  // Funkcja do skanowania kodów kreskowych z ulepszoną detekcją
-  const scanForBarcode = useCallback(() => {
-    if (!scanningRef.current || !videoRef.current || !canvasRef.current) {
+  // Funkcja walidacji polskich kodów produktów spożywczych
+  const validatePolishFoodBarcode = useCallback((code) => {
+    const cleanCode = code.replace(/\D/g, ''); // Tylko cyfry
+    
+    console.log('🔍 Sprawdzam kod:', cleanCode, 'Długość:', cleanCode.length);
+    
+    // EAN-13 (13 cyfr) - najczęstszy w Polsce
+    if (cleanCode.length === 13) {
+      const countryCode = cleanCode.substring(0, 3);
+      console.log('📍 Prefix krajowy EAN-13:', countryCode);
+      
+      return {
+        isValid: true,
+        code: cleanCode,
+        format: 'EAN-13',
+        country: countryCode,
+        isPolish: countryCode.startsWith('59'),
+        confidence: 'high'
+      };
+    }
+    
+    // EAN-8 (8 cyfr) - krótszy format
+    if (cleanCode.length === 8) {
+      console.log('📍 Kod EAN-8 znaleziony');
+      return {
+        isValid: true,
+        code: cleanCode,
+        format: 'EAN-8',
+        confidence: 'high'
+      };
+    }
+    
+    // UPC-A (12 cyfr) - produkty importowane z USA
+    if (cleanCode.length === 12) {
+      console.log('📍 Kod UPC-A znaleziony');
+      return {
+        isValid: true,
+        code: cleanCode,
+        format: 'UPC-A',
+        confidence: 'medium'
+      };
+    }
+    
+    console.log('❌ Kod odrzucony - nieprawidłowa długość:', cleanCode.length);
+    return { 
+      isValid: false, 
+      reason: `Nieprawidłowa długość kodu (${cleanCode.length} cyfr). Produkty spożywcze używają 8, 12 lub 13 cyfr.` 
+    };
+  }, []);
+
+  // Inicjalizacja ZXing
+  useEffect(() => {
+    try {
+      console.log('🚀 Inicjalizuję ZXing BrowserMultiFormatReader...');
+      const codeReader = new BrowserMultiFormatReader();
+      codeReaderRef.current = codeReader;
+      console.log('✅ ZXing zainicjalizowany pomyślnie');
+    } catch (err) {
+      console.error('❌ Błąd inicjalizacji ZXing:', err);
+      setError('Nie można zainicjalizować skanera kodów kreskowych');
+    }
+
+    return () => {
+      console.log('🧹 Czyszczenie ZXing...');
+      if (codeReaderRef.current) {
+        try {
+          codeReaderRef.current.reset();
+        } catch (err) {
+          console.log('Błąd podczas czyszczenia ZXing:', err);
+        }
+      }
+    };
+  }, []);
+
+  // Główna funkcja skanowania
+  const startScanning = useCallback(async () => {
+    if (!codeReaderRef.current) {
+      setError('Skaner nie został zainicjalizowany');
       return;
     }
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
+    try {
+      console.log('📱 Rozpoczynam skanowanie ZXing...');
+      scanningRef.current = true;
+      setIsScanning(true);
+      setScanAttempts(0);
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      const { videoWidth, videoHeight } = video;
-      
-      if (videoWidth === 0 || videoHeight === 0) {
-        console.log('Wideo nie ma jeszcze wymiarów, czekam...');
-        requestAnimationFrame(scanForBarcode);
-        return;
-      }
+      // Pobierz listę dostępnych urządzeń wideo
+      const videoInputDevices = await codeReaderRef.current.listVideoInputDevices();
+      console.log('📷 Dostępne kamery:', videoInputDevices.length);
 
-      canvas.width = videoWidth;
-      canvas.height = videoHeight;
+      // Wybierz tylną kamerę jeśli dostępna
+      let selectedDeviceId = undefined;
       
-      // Narysuj obecną klatkę
-      context.drawImage(video, 0, 0, videoWidth, videoHeight);
-      
-      // Debug: pokaż co widzi kamera
-      if (debugMode && debugCanvasRef.current) {
-        const debugCanvas = debugCanvasRef.current;
-        const debugContext = debugCanvas.getContext('2d');
-        debugCanvas.width = videoWidth / 4; // Mniejszy rozmiar dla debug
-        debugCanvas.height = videoHeight / 4;
-        debugContext.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
-      }
-
-      // Zwiększ licznik prób
-      setScanAttempts(prev => {
-        const newCount = prev + 1;
+      if (videoInputDevices.length > 0) {
+        // Szukaj tylnej kamery
+        const backCamera = videoInputDevices.find(device => 
+          device.label.toLowerCase().includes('back') || 
+          device.label.toLowerCase().includes('rear') ||
+          device.label.toLowerCase().includes('environment')
+        );
         
-        // Loguj co pewien czas próby skanowania
-        if (newCount % 60 === 0) { // Co ~2 sekundy przy 30 FPS
-          console.log(`📱 Skanowanie aktywne... próba ${newCount}. Rozdzielczość: ${videoWidth}x${videoHeight}`);
+        if (backCamera) {
+          selectedDeviceId = backCamera.deviceId;
+          console.log('📷 Używam tylnej kamery:', backCamera.label);
+        } else {
+          selectedDeviceId = videoInputDevices[0].deviceId;
+          console.log('📷 Używam pierwszej dostępnej kamery:', videoInputDevices[0].label);
         }
-        
-        return newCount;
-      });
+      }
 
-      try {
-        // Pobierz dane obrazu z różnych regionów
-        const regions = [
-          // Cały obraz
-          { x: 0, y: 0, width: videoWidth, height: videoHeight },
-          // Środkowa część (tam gdzie jest ramka)
-          { 
-            x: Math.floor(videoWidth * 0.2), 
-            y: Math.floor(videoHeight * 0.3), 
-            width: Math.floor(videoWidth * 0.6), 
-            height: Math.floor(videoHeight * 0.4) 
-          },
-          // Jeszcze mniejszy środek
-          { 
-            x: Math.floor(videoWidth * 0.3), 
-            y: Math.floor(videoHeight * 0.4), 
-            width: Math.floor(videoWidth * 0.4), 
-            height: Math.floor(videoHeight * 0.2) 
-          }
-        ];
+      console.log('🎯 Rozpoczynam ciągłe dekodowanie...');
 
-        for (const region of regions) {
-          const imageData = context.getImageData(region.x, region.y, region.width, region.height);
-          
-          // Spróbuj jsQR z różnymi opcjami
-          const qrOptions = [
-            { inversionAttempts: "dontInvert" },
-            { inversionAttempts: "onlyInvert" },
-            { inversionAttempts: "attemptBoth" }
-          ];
+      // Rozpocznij ciągłe skanowanie
+      const controls = await codeReaderRef.current.decodeFromVideoDevice(
+        selectedDeviceId,
+        videoRef.current,
+        (result, error, controls) => {
+          setScanAttempts(prev => prev + 1);
 
-          for (const options of qrOptions) {
-            const code = jsQR(imageData.data, imageData.width, imageData.height, options);
+          if (result) {
+            const scannedCode = result.getText();
+            console.log('🎯 ZXing wykrył kod:', scannedCode, 'Format:', result.getBarcodeFormat());
+
+            // Waliduj kod
+            const validation = validatePolishFoodBarcode(scannedCode);
             
-            if (code && code.data) {
-              console.log('🎉 Znaleziono kod:', code.data);
+            if (validation.isValid) {
+              console.log('✅ Kod zaakceptowany:', validation);
+              setLastScannedCode(validation.code);
               
-              // Sprawdź różne formaty kodów produktowych
-              const cleanCode = code.data.replace(/\D/g, '');
-              const originalCode = code.data.trim();
+              // Zatrzymaj skanowanie
+              scanningRef.current = false;
+              setIsScanning(false);
               
-              // Akceptuj różne formaty
-              const isValidBarcode = (
-                // Standardowe kody kreskowe (8-14 cyfr)
-                (cleanCode.length >= 8 && cleanCode.length <= 14) ||
-                // Kody z prefiksami
-                originalCode.match(/^(EAN|UPC|ISBN)?\s*\d{8,14}$/i) ||
-                // Kody mieszane (cyfry i litery)
-                originalCode.match(/^[A-Z0-9]{8,20}$/i)
-              );
-
-              if (isValidBarcode) {
-                console.log('✅ Kod zaakceptowany:', cleanCode || originalCode);
-                scanningRef.current = false;
-                setIsScanning(false);
-                onDetected(cleanCode || originalCode);
-                return;
-              } else {
-                console.log('❌ Kod odrzucony (format):', originalCode, 'Długość czystych cyfr:', cleanCode.length);
+              if (controls) {
+                controls.stop();
               }
+              
+              onDetected(validation.code);
+            } else {
+              console.log('❌ Kod odrzucony:', validation.reason);
+              // Kontynuuj skanowanie - nie zatrzymuj
             }
           }
-        }
 
-      } catch (scanError) {
-        console.error('Błąd podczas skanowania:', scanError);
+          if (error && !(error instanceof NotFoundException)) {
+            console.log('⚠️ Błąd skanowania (kontynuuję):', error.message);
+          }
+        }
+      );
+
+      // Zapisz kontrolki do zatrzymania później
+      streamRef.current = controls;
+
+    } catch (err) {
+      console.error('❌ Błąd podczas skanowania:', err);
+      
+      let errorMessage = 'Nie można uruchomić skanera kodów kreskowych.';
+      
+      if (err.name === 'NotAllowedError') {
+        errorMessage = 'Dostęp do kamery został odrzucony. Kliknij ikonę kamery w pasku adresu i zezwól na dostęp.';
+      } else if (err.name === 'NotFoundError') {
+        errorMessage = 'Nie znaleziono kamery w urządzeniu.';
+      } else if (err.name === 'NotSupportedError') {
+        errorMessage = 'Kamera nie jest obsługiwana przez przeglądarkę.';
+      } else if (err.message) {
+        errorMessage = `Błąd skanera: ${err.message}`;
       }
-    } else {
-      console.log('Wideo nie jest gotowe, readyState:', video.readyState);
+      
+      setError(errorMessage);
+      setIsScanning(false);
+      scanningRef.current = false;
     }
+  }, [validatePolishFoodBarcode, onDetected]);
 
-    // Kontynuuj skanowanie
-    requestAnimationFrame(scanForBarcode);
-  }, [debugMode, onDetected]);
-
+  // Uruchom skanowanie po załadowaniu komponentu
   useEffect(() => {
-    let videoStream = null;
-
-    const startCamera = async () => {
-      try {
-        // Spróbuj różnych konfiguracji kamery
-        const constraints = [
-          // Konfiguracja 1: Tylna kamera z wysoką rozdzielczością
-          {
-            video: { 
-              facingMode: 'environment',
-              width: { ideal: 1920, min: 640 },
-              height: { ideal: 1080, min: 480 },
-              focusMode: 'continuous'
-            }
-          },
-          // Konfiguracja 2: Tylna kamera z niższą rozdzielczością
-          {
-            video: { 
-              facingMode: 'environment',
-              width: { ideal: 1280, min: 640 },
-              height: { ideal: 720, min: 480 }
-            }
-          },
-          // Konfiguracja 3: Dowolna kamera
-          {
-            video: { 
-              width: { ideal: 1280, min: 640 },
-              height: { ideal: 720, min: 480 }
-            }
-          },
-          // Konfiguracja 4: Podstawowa
-          {
-            video: true
-          }
-        ];
-
-        let stream = null;
-        let lastError = null;
-
-        for (const constraint of constraints) {
-          try {
-            console.log('Próbuję konfigurację kamery:', constraint);
-            stream = await navigator.mediaDevices.getUserMedia(constraint);
-            console.log('Sukces z konfiguracją:', constraint);
-            break;
-          } catch (err) {
-            console.log('Niepowodzenie z konfiguracją:', constraint, err);
-            lastError = err;
-          }
-        }
-
-        if (!stream) {
-          throw lastError || new Error('Nie można uruchomić żadnej konfiguracji kamery');
-        }
-        
-        videoStream = stream;
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          
-          videoRef.current.onloadedmetadata = () => {
-            console.log('Metadane wideo załadowane');
-            console.log('Rozdzielczość wideo:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
-            
-            videoRef.current.play().then(() => {
-              console.log('Wideo rozpoczęte, uruchamiam skanowanie...');
-              setIsScanning(true);
-              scanningRef.current = true;
-              setTimeout(() => {
-                scanForBarcode();
-              }, 1000); // Dłuższe opóźnienie
-            }).catch(err => {
-              console.error('Błąd odtwarzania wideo:', err);
-              setError('Nie można uruchomić podglądu kamery');
-            });
-          };
-        }
-      } catch (err) {
-        console.error('Błąd dostępu do kamery:', err);
-        let errorMessage = 'Nie można uzyskać dostępu do kamery.';
-        
-        if (err.name === 'NotAllowedError') {
-          errorMessage = 'Dostęp do kamery został odrzucony. Kliknij ikonę kamery w pasku adresu i zezwól na dostęp.';
-        } else if (err.name === 'NotFoundError') {
-          errorMessage = 'Nie znaleziono kamery w urządzeniu.';
-        } else if (err.name === 'NotSupportedError') {
-          errorMessage = 'Kamera nie jest obsługiwana przez przeglądarkę.';
-        }
-        
-        setError(errorMessage);
+    const timeoutId = setTimeout(() => {
+      if (codeReaderRef.current && !error) {
+        startScanning();
       }
-    };
-
-    startCamera();
+    }, 500);
 
     return () => {
-      console.log('🧹 Czyszczenie skanera...');
+      console.log('🧹 Czyszczenie efektu skanowania...');
+      clearTimeout(timeoutId);
       scanningRef.current = false;
       setIsScanning(false);
       
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => {
-          track.stop();
-        });
+      // Zatrzymaj strumień wideo
+      if (streamRef.current) {
+        try {
+          streamRef.current.stop();
+        } catch (err) {
+          console.log('Błąd zatrzymania strumienia:', err);
+        }
       }
     };
-  }, [scanForBarcode]);
+  }, [startScanning, error]);
 
   const handleManualInput = () => {
-    const barcode = prompt('Wprowadź kod kreskowy ręcznie:');
+    const barcode = prompt('Wprowadź kod kreskowy produktu spożywczego (8, 12 lub 13 cyfr):');
     if (barcode && barcode.trim()) {
-      onDetected(barcode.trim());
+      const validation = validatePolishFoodBarcode(barcode.trim());
+      
+      if (validation.isValid) {
+        onDetected(validation.code);
+      } else {
+        alert(`Nieprawidłowy kod kreskowy: ${validation.reason}\n\n🛒 Produkty spożywcze w Polsce używają:\n• EAN-13 (13 cyfr) - najczęściej\n• EAN-8 (8 cyfr)\n• UPC-A (12 cyfr) - produkty importowane`);
+      }
     }
   };
 
@@ -256,19 +234,20 @@ function BarcodeScanner({ onDetected, onCancel }) {
     return (
       <div className="scanner-container">
         <div className="scanner-header">
-          <h3>❌ Błąd kamery</h3>
+          <h3>❌ Błąd skanera</h3>
           <button onClick={onCancel} className="cancel-button">✕</button>
         </div>
         <div className="scanner-error">
           <p><strong>{error}</strong></p>
           <div style={{ margin: '1rem 0' }}>
-            <p><strong>Rozwiązania:</strong></p>
+            <p><strong>💡 Rozwiązania:</strong></p>
             <ul style={{ textAlign: 'left', marginTop: '0.5rem' }}>
-              <li>Kliknij ikonę 🔒 lub 📷 w pasku adresu</li>
-              <li>Wybierz "Zezwól" na dostęp do kamery</li>
-              <li>Odśwież stronę (F5)</li>
-              <li>Sprawdź czy inne aplikacje nie blokują kamery</li>
-              <li>Użyj przeglądarki Chrome lub Firefox</li>
+              <li>🔒 Kliknij ikonę kamery w pasku adresu</li>
+              <li>✅ Wybierz "Zezwól" na dostęp do kamery</li>
+              <li>🔄 Odśwież stronę (F5)</li>
+              <li>📱 Sprawdź czy inne aplikacje nie używają kamery</li>
+              <li>🌐 Użyj przeglądarki Chrome lub Firefox</li>
+              <li>🔒 Upewnij się że strona używa HTTPS</li>
             </ul>
           </div>
           <button onClick={handleManualInput} className="button-primary">
@@ -283,7 +262,7 @@ function BarcodeScanner({ onDetected, onCancel }) {
     <div className="scanner-container">
       <div className="scanner-header">
         <h3>
-          {isScanning ? `📱 Skanowanie... (${scanAttempts})` : '⏳ Uruchamianie...'}
+          {isScanning ? `🛒 Skanowanie ZXing... (${scanAttempts})` : '⏳ Uruchamianie skanera...'}
         </h3>
         <div>
           <button onClick={toggleDebug} className="cancel-button" style={{ marginRight: '10px' }}>
@@ -306,22 +285,26 @@ function BarcodeScanner({ onDetected, onCancel }) {
             objectFit: 'cover'
           }}
         />
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
         
         <div className="scanner-overlay">
           <div className="scanner-frame"></div>
           <p className="scanner-instruction">
             {isScanning 
-              ? '🎯 Skieruj na kod kreskowy' 
-              : '⏳ Ładowanie...'}
+              ? '🎯 Wyceluj w kod kreskowy produktu' 
+              : '⏳ Ładowanie skanera ZXing...'}
           </p>
           {isScanning && (
             <div style={{ textAlign: 'center', marginTop: '10px' }}>
-              <p style={{ fontSize: '0.8rem', color: 'white', background: 'rgba(0,0,0,0.5)', padding: '5px 10px', borderRadius: '10px' }}>
-                💡 Ustaw kod w środku ramki<br/>
-                📱 Trzymaj stabilnie<br/>
-                💡 Sprawdź oświetlenie
+              <p style={{ fontSize: '0.8rem', color: 'white', background: 'rgba(0,0,0,0.7)', padding: '8px 15px', borderRadius: '15px', margin: '5px' }}>
+                🛒 <strong>Skanowanie produktów PL</strong><br/>
+                📱 Ustaw kod w centrum ramki<br/>
+                💡 Dobra lampka + stabilnie trzymaj
               </p>
+              {lastScannedCode && (
+                <p style={{ fontSize: '0.7rem', color: '#90EE90', background: 'rgba(0,0,0,0.8)', padding: '5px 10px', borderRadius: '10px', margin: '5px' }}>
+                  ⏮️ Ostatni: {lastScannedCode}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -331,23 +314,19 @@ function BarcodeScanner({ onDetected, onCancel }) {
             position: 'absolute', 
             top: '10px', 
             left: '10px', 
-            background: 'rgba(0,0,0,0.8)', 
-            padding: '10px',
-            borderRadius: '5px',
+            background: 'rgba(0,0,0,0.9)', 
+            padding: '15px',
+            borderRadius: '8px',
             color: 'white',
-            fontSize: '0.8rem'
+            fontSize: '0.8rem',
+            maxWidth: '200px'
           }}>
-            <p>🔍 Tryb debug aktywny</p>
+            <p><strong>🔍 Debug ZXing</strong></p>
             <p>Próby: {scanAttempts}</p>
-            <canvas 
-              ref={debugCanvasRef}
-              style={{ 
-                border: '1px solid white', 
-                maxWidth: '100px',
-                display: 'block',
-                marginTop: '5px'
-              }}
-            />
+            <p>Status: {isScanning ? '✅ Skanuje' : '❌ Zatrzymany'}</p>
+            <p>Biblioteka: ZXing</p>
+            <p>Formaty: EAN-13/8, UPC-A</p>
+            {lastScannedCode && <p>Ostatni: {lastScannedCode}</p>}
           </div>
         )}
       </div>
@@ -356,12 +335,16 @@ function BarcodeScanner({ onDetected, onCancel }) {
         <button onClick={handleManualInput} className="button-primary">
           📝 Wprowadź kod ręcznie
         </button>
-        <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#666' }}>
-          <p>💡 <strong>Wskazówki:</strong></p>
-          <p>• Ustaw telefon 15-20cm od kodu</p>
-          <p>• Sprawdź czy kod jest ostry i dobrze oświetlony</p>
-          <p>• Spróbuj różnych kątów</p>
-          <p>• Włącz tryb debug (🔍) aby zobaczyć co widzi kamera</p>
+        <div style={{ marginTop: '15px', fontSize: '0.8rem', color: '#666', textAlign: 'center' }}>
+          <p><strong>🛒 Polskie produkty spożywcze:</strong></p>
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '8px', flexWrap: 'wrap' }}>
+            <span style={{ margin: '2px' }}>📊 EAN-13 (13 cyfr)</span>
+            <span style={{ margin: '2px' }}>📋 EAN-8 (8 cyfr)</span>
+            <span style={{ margin: '2px' }}>🇺🇸 UPC-A (12 cyfr)</span>
+          </div>
+          <p style={{ marginTop: '10px', fontSize: '0.75rem' }}>
+            💡 <strong>Wskazówki:</strong> 15-20cm od kodu, dobra lampka, trzymaj spokojnie
+          </p>
         </div>
       </div>
     </div>
