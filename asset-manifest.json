@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/product-scanner/static/css/main.1f676716.css",
+    "main.js": "/product-scanner/static/js/main.e4ab37de.js",
+    "index.html": "/product-scanner/index.html",
+    "main.1f676716.css.map": "/product-scanner/static/css/main.1f676716.css.map",
+    "main.e4ab37de.js.map": "/product-scanner/static/js/main.e4ab37de.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.1f676716.css",
+    "static/js/main.e4ab37de.js"
+  ]
+}
