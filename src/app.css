@@ -1,0 +1,370 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.App {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.app-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2rem 1rem;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.app-header h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.app-header p {
+  opacity: 0.9;
+  font-size: 1rem;
+}
+
+/* Main content */
+.app-main {
+  flex: 1;
+  padding: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Buttons */
+.button-primary, .button-secondary {
+  padding: 1rem 2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin: 0.5rem;
+}
+
+.button-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.button-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.button-secondary {
+  background: #fff;
+  color: #667eea;
+  border: 2px solid #667eea;
+}
+
+.button-secondary:hover {
+  background: #667eea;
+  color: white;
+}
+
+/* Start screen */
+.start-screen {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.scan-icon {
+  font-size: 4rem;
+  margin-bottom: 2rem;
+}
+
+/* Loading */
+.loading {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error */
+.error {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #e74c3c;
+}
+
+/* Scanner */
+.scanner-container {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.scanner-header {
+  background: #667eea;
+  color: white;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scanner-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.cancel-button {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
+.cancel-button:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.scanner-viewport {
+  position: relative;
+  height: 400px;
+  overflow: hidden;
+}
+
+.scanner-element {
+  width: 100%;
+  height: 100%;
+}
+
+.scanner-element canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
+.scanner-element video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
+.scanner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+}
+
+.scanner-frame {
+  width: 200px;
+  height: 100px;
+  border: 3px solid #ff6b6b;
+  border-radius: 8px;
+  position: relative;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0); }
+}
+
+.scanner-instruction {
+  color: white;
+  background: rgba(0,0,0,0.7);
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.scanner-error {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #e74c3c;
+}
+
+.scanner-error ul {
+  text-align: left;
+  max-width: 300px;
+  margin: 1rem auto;
+}
+
+/* Product display */
+.product-display {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.product-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1.5rem;
+}
+
+.product-header h2 {
+  margin-bottom: 0.5rem;
+}
+
+.product-barcode {
+  font-family: monospace;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.product-content {
+  padding: 1.5rem;
+}
+
+.product-image {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.product-image img {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.product-name {
+  font-size: 1.5rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.product-brand {
+  color: #666;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.product-categories {
+  color: #888;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.product-nutrition {
+  margin: 1.5rem 0;
+}
+
+.product-nutrition h4 {
+  color: #333;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.nutrition-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.nutrition-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.nutrition-label {
+  font-weight: 500;
+  color: #555;
+}
+
+.nutrition-value {
+  font-weight: 600;
+  color: #333;
+}
+
+.product-ingredients {
+  margin: 1.5rem 0;
+}
+
+.product-ingredients h4 {
+  color: #333;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.product-ingredients p {
+  color: #666;
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+.product-actions {
+  padding: 1.5rem;
+  background: #f8f9fa;
+  text-align: center;
+  border-top: 1px solid #e9ecef;
+}
+
+/* Responsive design */
+@media (max-width: 480px) {
+  .app-header {
+    padding: 1.5rem 1rem;
+  }
+  
+  .app-header h1 {
+    font-size: 1.5rem;
+  }
+  
+  .nutrition-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .scanner-frame {
+    width: 150px;
+    height: 75px;
+  }
+  
+  .button-primary, .button-secondary {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.9rem;
+  }
+}
