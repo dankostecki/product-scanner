@@ -228,6 +228,13 @@ body {
   margin: 1rem auto;
 }
 
+.manual-input {
+  padding: 1rem;
+  text-align: center;
+  background: #f8f9fa;
+  border-top: 1px solid #e9ecef;
+}
+
 /* Product display */
 .product-display {
   background: white;
@@ -367,10 +374,4 @@ body {
     padding: 0.75rem 1.5rem;
     font-size: 0.9rem;
   }
-
-  .manual-input {
-  padding: 1rem;
-  text-align: center;
-  background: #f8f9fa;
-  border-top: 1px solid #e9ecef;
 }
