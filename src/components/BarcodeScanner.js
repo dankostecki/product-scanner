@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import jsQR from 'jsqr';
 
 function BarcodeScanner({ onDetected, onCancel }) {
@@ -10,11 +10,130 @@ function BarcodeScanner({ onDetected, onCancel }) {
   const [debugMode, setDebugMode] = useState(false);
   const [scanAttempts, setScanAttempts] = useState(0);
   const scanningRef = useRef(false);
-  const lastScanTimeRef = useRef(0);
+
+  // Funkcja do skanowania kodów kreskowych z ulepszoną detekcją
+  const scanForBarcode = useCallback(() => {
+    if (!scanningRef.current || !videoRef.current || !canvasRef.current) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      const { videoWidth, videoHeight } = video;
+      
+      if (videoWidth === 0 || videoHeight === 0) {
+        console.log('Wideo nie ma jeszcze wymiarów, czekam...');
+        requestAnimationFrame(scanForBarcode);
+        return;
+      }
+
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+      
+      // Narysuj obecną klatkę
+      context.drawImage(video, 0, 0, videoWidth, videoHeight);
+      
+      // Debug: pokaż co widzi kamera
+      if (debugMode && debugCanvasRef.current) {
+        const debugCanvas = debugCanvasRef.current;
+        const debugContext = debugCanvas.getContext('2d');
+        debugCanvas.width = videoWidth / 4; // Mniejszy rozmiar dla debug
+        debugCanvas.height = videoHeight / 4;
+        debugContext.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
+      }
+
+      // Zwiększ licznik prób
+      setScanAttempts(prev => {
+        const newCount = prev + 1;
+        
+        // Loguj co pewien czas próby skanowania
+        if (newCount % 60 === 0) { // Co ~2 sekundy przy 30 FPS
+          console.log(`📱 Skanowanie aktywne... próba ${newCount}. Rozdzielczość: ${videoWidth}x${videoHeight}`);
+        }
+        
+        return newCount;
+      });
+
+      try {
+        // Pobierz dane obrazu z różnych regionów
+        const regions = [
+          // Cały obraz
+          { x: 0, y: 0, width: videoWidth, height: videoHeight },
+          // Środkowa część (tam gdzie jest ramka)
+          { 
+            x: Math.floor(videoWidth * 0.2), 
+            y: Math.floor(videoHeight * 0.3), 
+            width: Math.floor(videoWidth * 0.6), 
+            height: Math.floor(videoHeight * 0.4) 
+          },
+          // Jeszcze mniejszy środek
+          { 
+            x: Math.floor(videoWidth * 0.3), 
+            y: Math.floor(videoHeight * 0.4), 
+            width: Math.floor(videoWidth * 0.4), 
+            height: Math.floor(videoHeight * 0.2) 
+          }
+        ];
+
+        for (const region of regions) {
+          const imageData = context.getImageData(region.x, region.y, region.width, region.height);
+          
+          // Spróbuj jsQR z różnymi opcjami
+          const qrOptions = [
+            { inversionAttempts: "dontInvert" },
+            { inversionAttempts: "onlyInvert" },
+            { inversionAttempts: "attemptBoth" }
+          ];
+
+          for (const options of qrOptions) {
+            const code = jsQR(imageData.data, imageData.width, imageData.height, options);
+            
+            if (code && code.data) {
+              console.log('🎉 Znaleziono kod:', code.data);
+              
+              // Sprawdź różne formaty kodów produktowych
+              const cleanCode = code.data.replace(/\D/g, '');
+              const originalCode = code.data.trim();
+              
+              // Akceptuj różne formaty
+              const isValidBarcode = (
+                // Standardowe kody kreskowe (8-14 cyfr)
+                (cleanCode.length >= 8 && cleanCode.length <= 14) ||
+                // Kody z prefiksami
+                originalCode.match(/^(EAN|UPC|ISBN)?\s*\d{8,14}$/i) ||
+                // Kody mieszane (cyfry i litery)
+                originalCode.match(/^[A-Z0-9]{8,20}$/i)
+              );
+
+              if (isValidBarcode) {
+                console.log('✅ Kod zaakceptowany:', cleanCode || originalCode);
+                scanningRef.current = false;
+                setIsScanning(false);
+                onDetected(cleanCode || originalCode);
+                return;
+              } else {
+                console.log('❌ Kod odrzucony (format):', originalCode, 'Długość czystych cyfr:', cleanCode.length);
+              }
+            }
+          }
+        }
+
+      } catch (scanError) {
+        console.error('Błąd podczas skanowania:', scanError);
+      }
+    } else {
+      console.log('Wideo nie jest gotowe, readyState:', video.readyState);
+    }
+
+    // Kontynuuj skanowanie
+    requestAnimationFrame(scanForBarcode);
+  }, [debugMode, onDetected]);
 
   useEffect(() => {
     let videoStream = null;
-    let animationFrame = null;
 
     const startCamera = async () => {
       try {
@@ -107,123 +226,6 @@ function BarcodeScanner({ onDetected, onCancel }) {
       }
     };
 
-    // Funkcja do skanowania kodów kreskowych z ulepszoną detekcją
-    const scanForBarcode = () => {
-      if (!scanningRef.current || !videoRef.current || !canvasRef.current) {
-        return;
-      }
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        const { videoWidth, videoHeight } = video;
-        
-        if (videoWidth === 0 || videoHeight === 0) {
-          console.log('Wideo nie ma jeszcze wymiarów, czekam...');
-          animationFrame = requestAnimationFrame(scanForBarcode);
-          return;
-        }
-
-        canvas.width = videoWidth;
-        canvas.height = videoHeight;
-        
-        // Narysuj obecną klatkę
-        context.drawImage(video, 0, 0, videoWidth, videoHeight);
-        
-        // Debug: pokaż co widzi kamera
-        if (debugMode && debugCanvasRef.current) {
-          const debugCanvas = debugCanvasRef.current;
-          const debugContext = debugCanvas.getContext('2d');
-          debugCanvas.width = videoWidth / 4; // Mniejszy rozmiar dla debug
-          debugCanvas.height = videoHeight / 4;
-          debugContext.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
-        }
-
-        // Zwiększ licznik prób
-        setScanAttempts(prev => prev + 1);
-
-        try {
-          // Pobierz dane obrazu z różnych regionów
-          const regions = [
-            // Cały obraz
-            { x: 0, y: 0, width: videoWidth, height: videoHeight },
-            // Środkowa część (tam gdzie jest ramka)
-            { 
-              x: Math.floor(videoWidth * 0.2), 
-              y: Math.floor(videoHeight * 0.3), 
-              width: Math.floor(videoWidth * 0.6), 
-              height: Math.floor(videoHeight * 0.4) 
-            },
-            // Jeszcze mniejszy środek
-            { 
-              x: Math.floor(videoWidth * 0.3), 
-              y: Math.floor(videoHeight * 0.4), 
-              width: Math.floor(videoWidth * 0.4), 
-              height: Math.floor(videoHeight * 0.2) 
-            }
-          ];
-
-          for (const region of regions) {
-            const imageData = context.getImageData(region.x, region.y, region.width, region.height);
-            
-            // Spróbuj jsQR z różnymi opcjami
-            const qrOptions = [
-              { inversionAttempts: "dontInvert" },
-              { inversionAttempts: "onlyInvert" },
-              { inversionAttempts: "attemptBoth" }
-            ];
-
-            for (const options of qrOptions) {
-              const code = jsQR(imageData.data, imageData.width, imageData.height, options);
-              
-              if (code && code.data) {
-                console.log('🎉 Znaleziono kod:', code.data);
-                
-                // Sprawdź różne formaty kodów produktowych
-                const cleanCode = code.data.replace(/\D/g, '');
-                const originalCode = code.data.trim();
-                
-                // Akceptuj różne formaty
-                const isValidBarcode = (
-                  // Standardowe kody kreskowe (8-14 cyfr)
-                  (cleanCode.length >= 8 && cleanCode.length <= 14) ||
-                  // Kody z prefiksami
-                  originalCode.match(/^(EAN|UPC|ISBN)?\s*\d{8,14}$/i) ||
-                  // Kody mieszane (cyfry i litery)
-                  originalCode.match(/^[A-Z0-9]{8,20}$/i)
-                );
-
-                if (isValidBarcode) {
-                  console.log('✅ Kod zaakceptowany:', cleanCode || originalCode);
-                  scanningRef.current = false;
-                  setIsScanning(false);
-                  onDetected(cleanCode || originalCode);
-                  return;
-                } else {
-                  console.log('❌ Kod odrzucony (format):', originalCode, 'Długość czystych cyfr:', cleanCode.length);
-                }
-              }
-            }
-          }
-
-          // Loguj co pewien czas próby skanowania
-          if (scanAttempts % 60 === 0) { // Co ~2 sekundy przy 30 FPS
-            console.log(`📱 Skanowanie aktywne... próba ${scanAttempts}. Rozdzielczość: ${videoWidth}x${videoHeight}`);
-          }
-
-        } catch (scanError) {
-          console.error('Błąd podczas skanowania:', scanError);
-        }
-      } else {
-        console.log('Wideo nie jest gotowe, readyState:', video.readyState);
-      }
-
-      // Kontynuuj skanowanie
-      animationFrame = requestAnimationFrame(scanForBarcode);
-    };
-
     startCamera();
 
     return () => {
@@ -231,17 +233,13 @@ function BarcodeScanner({ onDetected, onCancel }) {
       scanningRef.current = false;
       setIsScanning(false);
       
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-      
       if (videoStream) {
         videoStream.getTracks().forEach(track => {
           track.stop();
         });
       }
     };
-  }, [onDetected, debugMode]);
+  }, [scanForBarcode]);
 
   const handleManualInput = () => {
     const barcode = prompt('Wprowadź kod kreskowy ręcznie:');
