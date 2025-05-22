@@ -3,13 +3,11 @@ name: Deploy React App to GitHub Pages
 on:
   push:
     branches: [ main ]
-  # Usuń pull_request - nie potrzebujemy deployować na PR
-  
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     
-    # Dodaj uprawnienia
     permissions:
       contents: read
       pages: write
@@ -23,23 +21,16 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm' # Dodaj cache dla szybszych buildów
+        cache: 'npm'
         
     - name: Install dependencies
-      run: npm ci # Użyj npm ci zamiast npm install
+      run: npm ci
       
     - name: Build
       run: npm run build
       
-    # Alternatywnie możesz użyć oficjalnego GitHub Pages action
-    - name: Setup Pages
-      uses: actions/configure-pages@v3
-      
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v2
-      with:
-        path: ./build
-        
     - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v2
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./build
