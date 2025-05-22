@@ -5,13 +5,17 @@ function BarcodeScanner({ onDetected, onCancel }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let videoStream = null;
+    const currentRef = scannerRef.current;
+
     const startCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' }
         });
         
-        const currentRef = scannerRef.current;
+        videoStream = stream;
+        
         if (currentRef) {
           const video = document.createElement('video');
           video.srcObject = stream;
@@ -31,11 +35,16 @@ function BarcodeScanner({ onDetected, onCancel }) {
     startCamera();
 
     return () => {
-      const currentRef = scannerRef.current;
+      // Zatrzymaj strumień video
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Wyczyść element DOM
       if (currentRef) {
         const video = currentRef.querySelector('video');
-        if (video && video.srcObject) {
-          video.srcObject.getTracks().forEach(track => track.stop());
+        if (video) {
+          currentRef.removeChild(video);
         }
       }
     };
