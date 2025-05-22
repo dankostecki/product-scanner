@@ -5,9 +5,11 @@ function BarcodeScanner({ onDetected, onCancel }) {
   const videoRef = useRef(null);
   const [error, setError] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const scanningRef = useRef(false);
   const codeReaderRef = useRef(null);
   const streamRef = useRef(null);
+  const videoStreamRef = useRef(null);
 
   // Funkcja walidacji polskich kodów produktów spożywczych
   const validatePolishFoodBarcode = useCallback((code) => {
@@ -46,57 +48,131 @@ function BarcodeScanner({ onDetected, onCancel }) {
     };
   }, []);
 
-  // Inicjalizacja ZXing
-  useEffect(() => {
-    try {
-      const codeReader = new BrowserMultiFormatReader();
-      codeReaderRef.current = codeReader;
-    } catch (err) {
-      console.error('Błąd inicjalizacji ZXing:', err);
-      setError('Nie można zainicjalizować skanera kodów kreskowych');
+  // Funkcja do pełnego zatrzymania kamery
+  const stopCamera = useCallback(() => {
+    console.log('🛑 Zatrzymuję kamerę...');
+    
+    // Zatrzymaj ZXing
+    if (streamRef.current) {
+      try {
+        streamRef.current.stop();
+        streamRef.current = null;
+      } catch (err) {
+        console.log('Błąd zatrzymania ZXing controls:', err);
+      }
     }
 
-    return () => {
-      if (codeReaderRef.current) {
-        try {
-          codeReaderRef.current.reset();
-        } catch (err) {
-          console.log('Błąd podczas czyszczenia ZXing:', err);
+    // Zatrzymaj wszystkie ścieżki video
+    if (videoStreamRef.current) {
+      try {
+        videoStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log('🔴 Zatrzymano track:', track.kind, track.label);
+        });
+        videoStreamRef.current = null;
+      } catch (err) {
+        console.log('Błąd zatrzymania video tracks:', err);
+      }
+    }
+
+    // Wyczyść video element
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    // Zresetuj ZXing reader
+    if (codeReaderRef.current) {
+      try {
+        codeReaderRef.current.reset();
+      } catch (err) {
+        console.log('Błąd resetowania ZXing:', err);
+      }
+    }
+
+    scanningRef.current = false;
+    setIsScanning(false);
+  }, []);
+
+  // Inicjalizacja ZXing
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeScanner = async () => {
+      try {
+        console.log('🚀 Inicjalizuję skaner...');
+        
+        // Poczekaj chwilę na zwolnienie zasobów
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        if (!isMounted) return;
+
+        const codeReader = new BrowserMultiFormatReader();
+        codeReaderRef.current = codeReader;
+        
+        console.log('✅ Skaner zainicjalizowany');
+        setIsInitializing(false);
+      } catch (err) {
+        console.error('❌ Błąd inicjalizacji:', err);
+        if (isMounted) {
+          setError('Nie można zainicjalizować skanera kodów kreskowych');
+          setIsInitializing(false);
         }
       }
     };
-  }, []);
+
+    initializeScanner();
+
+    return () => {
+      isMounted = false;
+      console.log('🧹 Czyszczenie inicjalizacji...');
+      stopCamera();
+    };
+  }, [stopCamera]);
 
   // Główna funkcja skanowania
   const startScanning = useCallback(async () => {
-    if (!codeReaderRef.current) {
-      setError('Skaner nie został zainicjalizowany');
+    if (!codeReaderRef.current || isInitializing) {
+      console.log('⏳ Skaner nie jest gotowy, czekam...');
       return;
     }
 
+    // Zatrzymaj poprzednie skanowanie jeśli istnieje
+    stopCamera();
+
     try {
+      console.log('📱 Rozpoczynam nowe skanowanie...');
+      
+      // Poczekaj na zwolnienie zasobów
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       scanningRef.current = true;
       setIsScanning(true);
+      setError(null);
 
       // Pobierz listę dostępnych urządzeń wideo
       const videoInputDevices = await codeReaderRef.current.listVideoInputDevices();
+      console.log('📷 Dostępne kamery:', videoInputDevices.length);
+
+      if (videoInputDevices.length === 0) {
+        throw new Error('Nie znaleziono żadnej kamery');
+      }
 
       // Wybierz tylną kamerę jeśli dostępna
       let selectedDeviceId = undefined;
       
-      if (videoInputDevices.length > 0) {
-        // Szukaj tylnej kamery
-        const backCamera = videoInputDevices.find(device => 
-          device.label.toLowerCase().includes('back') || 
-          device.label.toLowerCase().includes('rear') ||
-          device.label.toLowerCase().includes('environment')
-        );
-        
-        if (backCamera) {
-          selectedDeviceId = backCamera.deviceId;
-        } else {
-          selectedDeviceId = videoInputDevices[0].deviceId;
-        }
+      // Szukaj tylnej kamery
+      const backCamera = videoInputDevices.find(device => 
+        device.label.toLowerCase().includes('back') || 
+        device.label.toLowerCase().includes('rear') ||
+        device.label.toLowerCase().includes('environment')
+      );
+      
+      if (backCamera) {
+        selectedDeviceId = backCamera.deviceId;
+        console.log('📷 Używam tylnej kamery:', backCamera.label);
+      } else {
+        selectedDeviceId = videoInputDevices[0].deviceId;
+        console.log('📷 Używam pierwszej kamery:', videoInputDevices[0].label);
       }
 
       // Rozpocznij ciągłe skanowanie
@@ -104,38 +180,47 @@ function BarcodeScanner({ onDetected, onCancel }) {
         selectedDeviceId,
         videoRef.current,
         (result, error) => {
+          if (!scanningRef.current) return;
+
           if (result) {
             const scannedCode = result.getText();
+            console.log('🎯 Znaleziono kod:', scannedCode);
 
             // Waliduj kod
             const validation = validatePolishFoodBarcode(scannedCode);
             
             if (validation.isValid) {
-              // Zatrzymaj skanowanie
-              scanningRef.current = false;
-              setIsScanning(false);
+              console.log('✅ Kod zaakceptowany, zatrzymuję skanowanie');
               
-              if (controls) {
-                controls.stop();
-              }
+              // Zatrzymaj skanowanie przed wywołaniem callback
+              stopCamera();
               
-              onDetected(validation.code);
+              // Wywołaj callback po krótkiej przerwie
+              setTimeout(() => {
+                onDetected(validation.code);
+              }, 100);
             }
             // Jeśli kod jest nieprawidłowy, kontynuuj skanowanie
           }
 
           if (error && !(error instanceof NotFoundException)) {
-            // Loguj błędy ale kontynuuj skanowanie
-            console.log('Błąd skanowania:', error.message);
+            console.log('⚠️ Błąd skanowania:', error.message);
           }
         }
       );
 
-      // Zapisz kontrolki do zatrzymania później
+      // Zapisz kontrolki i strumień
       streamRef.current = controls;
+      
+      // Zapisz też strumień video dla lepszego cleanup
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoStreamRef.current = videoRef.current.srcObject;
+      }
+
+      console.log('✅ Skanowanie uruchomione pomyślnie');
 
     } catch (err) {
-      console.error('Błąd podczas skanowania:', err);
+      console.error('❌ Błąd podczas skanowania:', err);
       
       let errorMessage = 'Nie można uruchomić skanera kodów kreskowych.';
       
@@ -150,34 +235,30 @@ function BarcodeScanner({ onDetected, onCancel }) {
       }
       
       setError(errorMessage);
-      setIsScanning(false);
-      scanningRef.current = false;
+      stopCamera();
     }
-  }, [validatePolishFoodBarcode, onDetected]);
+  }, [validatePolishFoodBarcode, onDetected, stopCamera, isInitializing]);
 
   // Uruchom skanowanie po załadowaniu komponentu
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (codeReaderRef.current && !error) {
+    if (!isInitializing && codeReaderRef.current && !error) {
+      const timeoutId = setTimeout(() => {
         startScanning();
-      }
-    }, 500);
+      }, 100);
 
+      return () => {
+        clearTimeout(timeoutId);
+      };
+    }
+  }, [startScanning, isInitializing, error]);
+
+  // Cleanup przy odmontowaniu komponentu
+  useEffect(() => {
     return () => {
-      clearTimeout(timeoutId);
-      scanningRef.current = false;
-      setIsScanning(false);
-      
-      // Zatrzymaj strumień wideo
-      if (streamRef.current) {
-        try {
-          streamRef.current.stop();
-        } catch (err) {
-          console.log('Błąd zatrzymania strumienia:', err);
-        }
-      }
+      console.log('🧹 Komponent odmontowany, czyszczę wszystko...');
+      stopCamera();
     };
-  }, [startScanning, error]);
+  }, [stopCamera]);
 
   const handleManualInput = () => {
     const barcode = prompt('Wprowadź kod kreskowy produktu (8, 12 lub 13 cyfr):');
@@ -185,6 +266,7 @@ function BarcodeScanner({ onDetected, onCancel }) {
       const validation = validatePolishFoodBarcode(barcode.trim());
       
       if (validation.isValid) {
+        stopCamera();
         onDetected(validation.code);
       } else {
         alert(`Nieprawidłowy kod kreskowy: ${validation.reason}\n\nProdukty spożywcze używają:\n• EAN-13 (13 cyfr) - najczęściej\n• EAN-8 (8 cyfr)\n• UPC-A (12 cyfr) - produkty importowane`);
@@ -192,12 +274,17 @@ function BarcodeScanner({ onDetected, onCancel }) {
     }
   };
 
+  const handleCancel = () => {
+    stopCamera();
+    onCancel();
+  };
+
   if (error) {
     return (
       <div className="scanner-container">
         <div className="scanner-header">
           <h3>Błąd skanera</h3>
-          <button onClick={onCancel} className="cancel-button">✕</button>
+          <button onClick={handleCancel} className="cancel-button">✕</button>
         </div>
         <div className="scanner-error">
           <p><strong>{error}</strong></p>
@@ -223,9 +310,13 @@ function BarcodeScanner({ onDetected, onCancel }) {
     <div className="scanner-container">
       <div className="scanner-header">
         <h3>
-          {isScanning ? 'Skanowanie...' : 'Uruchamianie skanera...'}
+          {isInitializing 
+            ? 'Inicjalizacja skanera...'
+            : isScanning 
+              ? 'Skanowanie...' 
+              : 'Uruchamianie kamery...'}
         </h3>
-        <button onClick={onCancel} className="cancel-button">✕</button>
+        <button onClick={handleCancel} className="cancel-button">✕</button>
       </div>
       
       <div className="scanner-viewport">
@@ -245,9 +336,11 @@ function BarcodeScanner({ onDetected, onCancel }) {
         <div className="scanner-overlay">
           <div className="scanner-frame"></div>
           <p className="scanner-instruction">
-            {isScanning 
-              ? 'Wyceluj w kod kreskowy produktu' 
-              : 'Ładowanie skanera...'}
+            {isInitializing
+              ? 'Przygotowywanie skanera...'
+              : isScanning 
+                ? 'Wyceluj w kod kreskowy produktu' 
+                : 'Ładowanie kamery...'}
           </p>
           {isScanning && (
             <div style={{ textAlign: 'center', marginTop: '15px' }}>
