@@ -2,19 +2,17 @@ import React, { useRef, useEffect, useState } from 'react';
 
 function BarcodeScanner({ onDetected, onCancel }) {
   const scannerRef = useRef(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Tymczasowo używamy prostszego rozwiązania bez Quagga
-    // Ze względu na problemy z biblioteką w środowisku produkcyjnym
     const startCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' }
         });
         
-        if (scannerRef.current) {
+        const currentRef = scannerRef.current;
+        if (currentRef) {
           const video = document.createElement('video');
           video.srcObject = stream;
           video.play();
@@ -22,8 +20,7 @@ function BarcodeScanner({ onDetected, onCancel }) {
           video.style.height = '100%';
           video.style.objectFit = 'cover';
           
-          scannerRef.current.appendChild(video);
-          setIsInitialized(true);
+          currentRef.appendChild(video);
         }
       } catch (err) {
         console.error('Błąd dostępu do kamery:', err);
@@ -34,8 +31,9 @@ function BarcodeScanner({ onDetected, onCancel }) {
     startCamera();
 
     return () => {
-      if (scannerRef.current) {
-        const video = scannerRef.current.querySelector('video');
+      const currentRef = scannerRef.current;
+      if (currentRef) {
+        const video = currentRef.querySelector('video');
         if (video && video.srcObject) {
           video.srcObject.getTracks().forEach(track => track.stop());
         }
