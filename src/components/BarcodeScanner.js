@@ -1,5 +1,4 @@
 import React, { useRef, useEffect, useState } from 'react';
-import Quagga from 'quagga';
 
 function BarcodeScanner({ onDetected, onCancel }) {
   const scannerRef = useRef(null);
@@ -7,87 +6,59 @@ function BarcodeScanner({ onDetected, onCancel }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const initScanner = () => {
-      if (!scannerRef.current) return;
-
-      Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: scannerRef.current,
-          constraints: {
-            width: { min: 320, ideal: 640, max: 1920 },
-            height: { min: 240, ideal: 480, max: 1080 },
-            facingMode: "environment" // Użyj tylnej kamery
-          },
-        },
-        locator: {
-          patchSize: "medium",
-          halfSample: true
-        },
-        numOfWorkers: 2,
-        decoder: {
-          readers: [
-            "ean_reader",
-            "ean_8_reader",
-            "ean_13_reader",
-            "code_128_reader",
-            "code_39_reader"
-          ]
-        },
-        locate: true
-      }, function(err) {
-        if (err) {
-          console.error('Błąd inicjalizacji skanera:', err);
-          setError('Nie można uruchomić kamery. Sprawdź uprawnienia.');
-          return;
-        }
+    // Tymczasowo używamy prostszego rozwiązania bez Quagga
+    // Ze względu na problemy z biblioteką w środowisku produkcyjnym
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
         
-        setIsInitialized(true);
-        Quagga.start();
-      });
-
-      // Obsługa wykrytego kodu
-      Quagga.onDetected((result) => {
-        if (result && result.codeResult && result.codeResult.code) {
-          const code = result.codeResult.code;
-          // Sprawdź, czy kod ma odpowiednią długość (minimalne zabezpieczenie)
-          if (code.length >= 8) {
-            onDetected(code);
-            Quagga.stop();
-          }
+        if (scannerRef.current) {
+          const video = document.createElement('video');
+          video.srcObject = stream;
+          video.play();
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.objectFit = 'cover';
+          
+          scannerRef.current.appendChild(video);
+          setIsInitialized(true);
         }
-      });
-    };
-
-    initScanner();
-
-    // Cleanup po odmontowaniu komponentu
-    return () => {
-      if (isInitialized) {
-        Quagga.stop();
+      } catch (err) {
+        console.error('Błąd dostępu do kamery:', err);
+        setError('Nie można uzyskać dostępu do kamery');
       }
     };
-  }, [onDetected, isInitialized]);
 
-  const handleCancel = () => {
-    if (isInitialized) {
-      Quagga.stop();
+    startCamera();
+
+    return () => {
+      if (scannerRef.current) {
+        const video = scannerRef.current.querySelector('video');
+        if (video && video.srcObject) {
+          video.srcObject.getTracks().forEach(track => track.stop());
+        }
+      }
+    };
+  }, []);
+
+  const handleManualInput = () => {
+    const barcode = prompt('Wprowadź kod kreskowy ręcznie:');
+    if (barcode && barcode.length >= 8) {
+      onDetected(barcode);
     }
-    onCancel();
   };
 
   if (error) {
     return (
       <div className="scanner-error">
         <p>❌ {error}</p>
-        <p>Sprawdź, czy:</p>
-        <ul>
-          <li>Przeglądarka ma dostęp do kamery</li>
-          <li>Używasz HTTPS lub localhost</li>
-          <li>Kamera nie jest używana przez inną aplikację</li>
-        </ul>
-        <button onClick={handleCancel} className="button-secondary">
+        <p>Spróbuj wprowadzić kod ręcznie:</p>
+        <button onClick={handleManualInput} className="button-primary">
+          Wprowadź kod ręcznie
+        </button>
+        <button onClick={onCancel} className="button-secondary">
           Wróć
         </button>
       </div>
@@ -98,7 +69,7 @@ function BarcodeScanner({ onDetected, onCancel }) {
     <div className="scanner-container">
       <div className="scanner-header">
         <h3>Skieruj kamerę na kod kreskowy</h3>
-        <button onClick={handleCancel} className="cancel-button">
+        <button onClick={onCancel} className="cancel-button">
           ✕ Anuluj
         </button>
       </div>
@@ -111,6 +82,12 @@ function BarcodeScanner({ onDetected, onCancel }) {
             Umieść kod kreskowy w ramce
           </p>
         </div>
+      </div>
+      
+      <div className="manual-input">
+        <button onClick={handleManualInput} className="button-secondary">
+          Wprowadź kod ręcznie
+        </button>
       </div>
     </div>
   );
